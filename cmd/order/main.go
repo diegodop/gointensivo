@@ -2,11 +2,14 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"github.com/diegodop/gointensivo/internal/infra/database"
 	"github.com/diegodop/gointensivo/internal/usecase"
+	"github.com/diegodop/gointensivo/pkg/rabbitmq"
 	_ "github.com/mattn/go-sqlite3"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type Car struct {
@@ -51,53 +54,30 @@ func main() {
 	orderRepository := database.NewOrderRepository(db)
 
 	uc := usecase.NewCalculateFinalPrice(orderRepository)
-
-	input := usecase.OrderInput{
-		ID:    "1234",
-		Price: 10.0,
-		Tax:   1.0,
-	}
-
-	output, err := uc.Execute(input)
+	ch, err := rabbitmq.OpenChannel()
 	if err != nil {
 		panic(err)
 	}
-	println(output)
-	fmt.Println(output)
-	/* x = "Hello World"
-	car := Car{ //declarando e atribuindo a variavel car
-		Model: "Ferrari",
-		Color: "Red",
+	defer ch.Close()
+	msgRabbitMQChannel := make(chan amqp.Delivery)
+	go rabbitmq.Consume(ch, msgRabbitMQChannel)
+	rabbitmqWorker(msgRabbitMQChannel, uc)
+
+}
+
+func rabbitmqWorker(msgChan chan amqp.Delivery, uc *usecase.CalculateFinalPrice) {
+	fmt.Println("Starting rabbitmq")
+	for msg := range msgChan {
+		var input usecase.OrderInput
+		err := json.Unmarshal(msg.Body, &input)
+		if err != nil {
+			panic(err)
+		}
+		output, err := uc.Execute(input)
+		if err != nil {
+			panic(err)
+		}
+		msg.Ack(false)
+		fmt.Println("Mensagem processada e salva no banco: ", output)
 	}
-	car.Model = "Fiat" //atribuindo o valor do atributo Model
-	println(car.Model)
-
-	car.Start()
-
-	car.ChangeColor("blue")
-	println(car.Color)
-	car.ChangeRealColor("blue")
-	println(car.Color)
-
-	a := 10
-	//b := a //copia o valor de a, mas são independentes
-	//b = 20
-
-	println(a)
-	//println(b)
-
-	println(&a) //imprime o endereço de memoria onde a está armazenado
-
-	b := &a
-	*b = 20
-
-	println(a)
-	println(b)
-
-	order, err := entity.NewOrder("1", -10, 1)
-	if err != nil {
-		println(err.Error())
-	} else {
-		println(order.ID)
-	} */
 }
